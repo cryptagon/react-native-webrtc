@@ -144,7 +144,7 @@ export default class RTCPeerConnection extends EventTarget(PEER_CONNECTION_EVENT
       WebRTCModule.peerConnectionAddTransceiver(this._peerConnectionId, {...src, init: { ...init } }, (successful, data) => {
         if (successful) {
           this._mergeState(data.state);
-          resolve(this._transceivers.find((v) => v.id === data.id));
+          resolve(this._findTransceiver(data.id));
         } else {
           reject(data);
         }
@@ -281,7 +281,7 @@ export default class RTCPeerConnection extends EventTarget(PEER_CONNECTION_EVENT
   }
 
   getSenders() {
-    return this.getTransceivers().map(t => t.sender)
+    return this.getTransceivers().filter(t => !!t).map(t => t.sender)
   }
 
   close() {
@@ -296,8 +296,12 @@ export default class RTCPeerConnection extends EventTarget(PEER_CONNECTION_EVENT
     return stream && stream._tracks.find(track => track.id === trackId);
   }
 
+  _findTransceiver(id): RTCRtpTransceiver {
+    return this._transceivers.filter(t1 => !!t1).find(t => t.id === id)
+  }
+
   _getTransceiver(state): RTCRtpTransceiver {
-    const existing = this._transceivers.find((t) => t.id === state.id);
+    const existing = this._findTransceiver(state.id);
     if (existing) {
       existing._updateState(state);
       return existing;
@@ -321,7 +325,7 @@ export default class RTCPeerConnection extends EventTarget(PEER_CONNECTION_EVENT
       }
       // Restore Order
       this._transceivers =
-        this._transceivers.map((t, i) => this._transceivers.find((t2) => t2.id === state.transceivers[i].id));
+        this._transceivers.map((_, i) => this._findTransceiver(state.transceivers[i]?.id)).filter(t => !!t);
     }
   }
 
