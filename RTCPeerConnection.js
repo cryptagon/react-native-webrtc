@@ -135,8 +135,16 @@ export default class RTCPeerConnection extends EventTarget(PEER_CONNECTION_EVENT
       } else if (source === 'video') {
         src = { type: 'video' };
       } else {
-        src = { trackId: track.id };
+        src = { trackId: source.id };
       }
+
+      if(init.streams) {
+        init.streamIds = init.streams.map(s => s.id)
+        delete init.streams
+      }
+
+      console.log("init.streamIds: ", init.streamIds)
+      console.log(`adding transciever for src: ${source.id} with opts: `, init)
 
       WebRTCModule.peerConnectionAddTransceiver(this._peerConnectionId, {...src, init: { ...init } }, (successful, data) => {
         if (successful) {
@@ -277,7 +285,6 @@ export default class RTCPeerConnection extends EventTarget(PEER_CONNECTION_EVENT
   getTransceivers() {
     return this._transceivers.slice();
   }
-
   close() {
     WebRTCModule.peerConnectionClose(this._peerConnectionId);
   }
