@@ -169,8 +169,14 @@ RCT_EXPORT_METHOD(peerConnectionAddTransceiver:(nonnull NSNumber *)objectID
             init.streamIds = [initOpt objectForKey: @"streamIds"];
             NSLog(@"adding transceiver with streamIds: %@", init.streamIds);
         }
+        if ([initOpt objectForKey:@"sendEncodings"] != nil) {
+            NSArray *encodingsDicts = [initOpt objectForKey:@"sendEncodings"];
+            NSArray *encodings = [self parseRtpSenderEncodings:encodingsDicts];
+            NSLog(@"adding encodings %@", encodings);
+            init.sendEncodings = [encodings copy];
+        }
     }
-
+    
     RTCRtpTransceiver *transceiver;
     if ([options objectForKey:@"type"] != nil) {
         NSString* type = [options objectForKey:@"type"];
@@ -197,7 +203,7 @@ RCT_EXPORT_METHOD(peerConnectionAddTransceiver:(nonnull NSNumber *)objectID
 
 RCT_EXPORT_METHOD(peerConnectionTransceiverSetDirection:(nonnull NSNumber *)objectID
                                   transceiverId:(NSString *)transceiverId
-                                      direction: (NSString* )direction
+                                      direction: (NSString *)direction
                                        callback:(RCTResponseSenderBlock)callback) {
    RTCPeerConnection *peerConnection = self.peerConnections[objectID];
    if (!peerConnection) {
@@ -207,6 +213,31 @@ RCT_EXPORT_METHOD(peerConnectionTransceiverSetDirection:(nonnull NSNumber *)obje
        if ([transceiver.sender.senderId isEqualToString:transceiverId]) {
            NSError *error;
            [transceiver setDirection:[self parseDirection:direction] error:&error];
+       }
+   }
+    id response = @{
+      @"id": transceiverId,
+      @"state": [self extractPeerConnectionState: peerConnection]
+    };
+    callback(@[@(YES), response]);
+}
+
+
+RCT_EXPORT_METHOD(peerConnectionTransceiverSetSenderParameters:(nonnull NSNumber *)objectID
+                                  transceiverId:(NSString *)transceiverId
+                                      options:(NSDictionary*)options
+                                       callback:(RCTResponseSenderBlock)callback ) {
+   RTCPeerConnection *peerConnection = self.peerConnections[objectID];
+   if (!peerConnection) {
+     return;
+   }
+   for (RTCRtpTransceiver *transceiver in peerConnection.transceivers) {
+       if ([transceiver.sender.senderId isEqualToString:transceiverId]) {
+           NSLog(@"peerconnectionTranscieverSetSenderParameters got options: %@", options);
+           if([options objectForKey:@"encodings"] != nil) {
+               transceiver.sender.parameters.encodings = [self parseRtpSenderEncodings:[options objectForKey:@"encodings"]];
+           }
+           NSLog(@"setting transceiver %@ parameters to: %@", transceiver.mid, transceiver.sender.parameters);
        }
    }
     id response = @{
@@ -629,6 +660,79 @@ RCT_EXPORT_METHOD(getTrackVolumes:(RCTResponseSenderBlock)callback)
     return RTCRtpTransceiverDirectionSendRecv;
 }
 
+- (NSArray *)parseRtpSenderEncodings:(NSArray *)encodingsArray {
+    NSMutableArray* encodings = [[NSMutableArray alloc] init];
+
+    for(NSDictionary *encoding in encodingsArray) {
+        RTCRtpEncodingParameters *params = [[RTCRtpEncodingParameters alloc] init];
+
+        //set defaults
+        params.scaleResolutionDownBy = @1.0;
+        params.bitratePriority = 4.0;
+        params.maxBitrateBps = @400000;
+        params.isActive = true;
+        
+        if ([encoding objectForKey:@"rid"] != nil) {
+            NSString* param = [encoding objectForKey:@"rid"];
+            if(param != nil) {
+                params.rid = param;
+            }
+        }
+
+        // maxBitrateBps
+        if ([encoding objectForKey:@"maxBitrate"] != nil) {
+            NSNumber* param = [encoding objectForKey:@"maxBitrate"];
+            if(param != nil) {
+                NSLog(@"setting max bitrate bps: %@", param);
+                params.maxBitrateBps = param;
+            }
+        }
+        // minBitrateBps
+        if ([encoding objectForKey:@"minBitrate"] != nil) {
+            NSNumber* param = [encoding objectForKey:@"minBitrate"];
+            if(param != nil) {
+                params.minBitrateBps = param;
+            }
+        }
+        // maxFramerate
+        if ([encoding objectForKey:@"maxFramerate"] != nil) {
+            NSNumber* param = [encoding objectForKey:@"maxFramerate"];
+            if(param != nil) {
+                params.maxFramerate = param;
+            }
+        }
+        // numTemporalLayers
+        if ([encoding objectForKey:@"numTemporalLayers"] != nil) {
+            NSNumber* param = [encoding objectForKey:@"numTemporalLayers"];
+            if(param != nil) {
+                params.numTemporalLayers = param;
+            }
+        }
+        // scaleResolutionDownBy
+        if ([encoding objectForKey:@"scaleResolutionDownBy"] != nil) {
+            NSNumber* param = [encoding objectForKey:@"scaleResolutionDownBy"];
+            if(param != nil) {
+                params.scaleResolutionDownBy = param;
+            }
+        }
+
+        [encodings addObject:params];
+    }
+    return encodings;
+}
+
+- (NSDictionary *)extractSender:(RTCRtpSender *)sender {
+    return @{
+        @"id": sender.senderId,
+        @"track": @{
+            @"id": sender.track.trackId,
+            @"kind": sender.track.kind,
+            @"label": sender.track.trackId,
+            @"enabled": @(sender.track.isEnabled),
+            @"readyState": @"live"
+        }
+    };
+}
 - (NSDictionary *)extractReceiver:(RTCRtpReceiver *)receiver {
     return @{
         @"id": receiver.receiverId,
@@ -645,13 +749,20 @@ RCT_EXPORT_METHOD(getTrackVolumes:(RCTResponseSenderBlock)callback)
 
 - (NSDictionary *)extractTransceiver:(RTCRtpTransceiver *)transceiver {
     NSMutableDictionary *res = [NSMutableDictionary dictionary];
-    [res setValue: transceiver.sender.senderId forKey:@"id"];
     if (transceiver.mid != nil) {
         [res setValue: transceiver.mid forKey:@"mid"];
     }
+    if(transceiver.sender != nil) {
+        [res setValue: transceiver.sender.senderId forKey:@"id"];
+        if(transceiver.sender.track != nil) {
+            [res setValue: [self extractSender:transceiver.sender] forKey:@"sender"];
+        }
+    }
     [res setValue:[self stringForTransceiverDirection: transceiver.direction] forKey:@"direction"];
     [res setValue: (transceiver.isStopped ? @YES : @NO) forKey:@"isStopped"];
-    [res setValue: [self extractReceiver:transceiver.receiver] forKey: @"receiver"];
+    if(transceiver.receiver != nil) {
+        [res setValue: [self extractReceiver:transceiver.receiver] forKey: @"receiver"];
+    }
     return res;
 }
 

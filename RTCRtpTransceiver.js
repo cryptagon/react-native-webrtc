@@ -25,7 +25,7 @@ export default class RTCRtpTransceiver {
         this._currentDirection = state.currentDirection;
         this._stopped = state.isStopped;
         this._mergeState = mergeState;
-        this._sender = new RTCRtpSender(this, mergeState);
+        this._sender = new RTCRtpSender(this, state.sender?.track ? new MediaStreamTrack(state.sender?.track) : null, mergeState);
         this._receiver = new RTCRtpReceiver(state.receiver.id, new MediaStreamTrack(state.receiver.track));
     }
 
