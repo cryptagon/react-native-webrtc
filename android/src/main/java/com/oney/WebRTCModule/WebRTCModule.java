@@ -20,6 +20,7 @@ import com.facebook.react.bridge.WritableMap;
 import com.facebook.react.module.annotations.ReactModule;
 import com.facebook.react.modules.core.DeviceEventManagerModule;
 
+import java.lang.reflect.Array;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -429,7 +430,7 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
             ThreadUtils.runOnExecutor(() -> peerConnectionInitAsync(rtcConfiguration, id));
 
             ThreadUtils.submitToExecutor(() -> {
-                PeerConnectionObserver observer = new PeerConnectionObserver(this, id);
+                PeerConnectionObserver observer = new PeerConnectionObserver(this, id, true);
                 PeerConnection peerConnection = mFactory.createPeerConnection(rtcConfiguration, observer);
                 observer.setPeerConnection(peerConnection);
                 mPeerConnectionObservers.put(id, observer);
@@ -438,6 +439,7 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
             e.printStackTrace();
             throw new RuntimeException(e);
         }
+    }
 
     private void peerConnectionInitAsync(
             PeerConnection.RTCConfiguration configuration,
@@ -449,7 +451,6 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
 
         observer.setPeerConnection(peerConnection);
         mPeerConnectionObservers.put(id, observer);
->>>>>>> 717ed34 (api: Adding and stopping Transceiver (android + js))
     }
 
     MediaStream getStreamForReactTag(String streamReactTag) {
@@ -656,6 +657,15 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
         }
         track.setEnabled(enabled);
         getUserMediaImpl.mediaStreamTrackSetEnabled(id, enabled);
+    }
+
+    @ReactMethod
+    public void mediaStreamTrackSetVolume(String trackId, double volume) {
+        MediaStreamTrack track = getTrack(trackId);
+
+        if(track != null && track.kind() == "audio") {
+            ((AudioTrack)track).setVolume(volume);
+        }
     }
 
     @ReactMethod
@@ -930,7 +940,6 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
                                               int id,
                                               Callback callback) {
         ThreadUtils.runOnExecutor(() -> {
-            peerConnectionAddICECandidateAsync(candidateMap, id, callback);
             PeerConnection peerConnection = getPeerConnection(id);
             if (peerConnection == null) {
                 Log.d(TAG, "peerConnectionAddICECandidate() peerConnection is null");
@@ -1153,6 +1162,8 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
     private RtpTransceiver.RtpTransceiverInit parseTransceiverOptions(ReadableMap map) {
         RtpTransceiver.RtpTransceiverDirection direction = RtpTransceiver.RtpTransceiverDirection.SEND_RECV;
         ArrayList<String> streamIds = new ArrayList<>();
+        List<RtpParameters.Encoding> sendEncodings = new ArrayList<>();
+
         if (map != null) {
             if (map.hasKey("direction")) {
                 String directionRaw = map.getString("direction");
@@ -1168,9 +1179,49 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
                     }
                 }
             }
+            if (map.hasKey("sendEncodings")) {
+                ReadableArray rawEncodings = map.getArray("sendEncodings");
+                sendEncodings = this.parseRtpSenderEncodings(rawEncodings);
+
+            }
         }
 
-        return new RtpTransceiver.RtpTransceiverInit(direction, streamIds);
+        return new RtpTransceiver.RtpTransceiverInit(direction, streamIds, sendEncodings);
+    }
+
+    private List<RtpParameters.Encoding> parseRtpSenderEncodings(ReadableArray rawEncodings) {
+        ArrayList<RtpParameters.Encoding> encodings = new ArrayList<>();
+
+        for(int i=0; i<rawEncodings.size(); i++) {
+            ReadableMap rawEncoding = rawEncodings.getMap(i);
+            RtpParameters.Encoding params = new RtpParameters.Encoding(null, true, 1.0D);
+
+            if(rawEncoding.hasKey("rid")){
+                params.rid = rawEncoding.getString("rid");
+            }
+            if(rawEncoding.hasKey("maxBitrate")) {
+                params.maxBitrateBps = rawEncoding.getInt("maxBitrate");
+            }
+            if(rawEncoding.hasKey("minBitrate")) {
+                params.minBitrateBps = rawEncoding.getInt("minBitrate");
+            }
+            if(rawEncoding.hasKey("maxFramerate")) {
+                params.maxFramerate = rawEncoding.getInt("maxFramerate");
+            }
+            if(rawEncoding.hasKey("numTemporalLayers")) {
+                params.numTemporalLayers = rawEncoding.getInt("numTemporalLayers");
+            }
+            if(rawEncoding.hasKey("scaleResolutionDownBy")) {
+                params.scaleResolutionDownBy = rawEncoding.getDouble("scaleResolutionDownBy");
+            }
+            if(rawEncoding.hasKey("active")) {
+                params.active = rawEncoding.getBoolean("active");
+            }
+
+            encodings.add(params);
+        }
+
+        return encodings;
     }
 
     private ReadableMap serializeTrack(MediaStreamTrack track) {
@@ -1190,14 +1241,21 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
         return trackInfo;
     }
 
-    private ReadableMap serializeReceiver(RtpReceiver receiver) {
+    protected ReadableMap serializeSender(RtpSender sender) {
+        WritableMap res = Arguments.createMap();
+        res.putString("id", sender.id());
+        res.putMap("track", serializeTrack(sender.track()));
+        return res;
+    }
+
+    protected ReadableMap serializeReceiver(RtpReceiver receiver) {
         WritableMap res = Arguments.createMap();
         res.putString("id", receiver.id());
         res.putMap("track", serializeTrack(receiver.track()));
         return res;
     }
 
-    private ReadableMap serializeTransceiver(String id, RtpTransceiver transceiver) {
+    protected ReadableMap serializeTransceiver(String id, RtpTransceiver transceiver) {
         WritableMap res = Arguments.createMap();
         res.putString("id", id);
         String mid = transceiver.getMid();
@@ -1347,4 +1405,58 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
             callback.invoke(false, "peerConnection is null");
         }
     }
+
+    @ReactMethod
+    public void peerConnectionTransceiverSetSenderParameters(int id,
+                                                      String transceiverId,
+                                                      ReadableMap options,
+                                                      final Callback callback) {
+        ThreadUtils.runOnExecutor(() ->
+                this.peerConnectionTransceiverSetSenderParametersAsync(id, transceiverId, options, callback));
+    }
+
+    private void peerConnectionTransceiverSetSenderParametersAsync(int id,
+                                                            String transceiverId,
+                                                            ReadableMap options,
+                                                            final Callback callback) {
+        PeerConnectionObserver pco = mPeerConnectionObservers.get(id);
+        if (pco != null) {
+            RtpTransceiver transceiver = pco.getTransceiver(transceiverId);
+
+            if(options.hasKey("encodings")) {
+                RtpParameters parameters = transceiver.getSender().getParameters();
+                List<RtpParameters.Encoding> newEncodings = parseRtpSenderEncodings(options.getArray("encodings"));
+
+
+                for (RtpParameters.Encoding newEncoding : newEncodings) {
+                    for (RtpParameters.Encoding encoding : parameters.encodings) {
+                        if (encoding.rid == newEncoding.rid) {
+                            encoding.maxBitrateBps = newEncoding.maxBitrateBps;
+                            encoding.minBitrateBps = newEncoding.minBitrateBps;
+                            encoding.maxFramerate = newEncoding.maxFramerate;
+                            encoding.numTemporalLayers = newEncoding.numTemporalLayers;
+                            encoding.scaleResolutionDownBy = newEncoding.scaleResolutionDownBy;
+                            encoding.active = newEncoding.active;
+
+                            Log.d(TAG, String.format("updated encoding: %s with params %s", encoding.rid, encoding));
+                            break;
+                        }
+                    }
+                }
+
+                transceiver.getSender().setParameters(parameters);
+            }
+
+            WritableMap res = Arguments.createMap();
+            res.putString("id", transceiverId);
+            res.putMap("state", this.serializeState(id));
+            callback.invoke(true, res);
+        } else {
+            Log.d(TAG, "peerConnectionTransceiverSetDirection() peerConnection is null");
+            callback.invoke(false, "peerConnection is null");
+        }
+    }
+
+
+
 }
