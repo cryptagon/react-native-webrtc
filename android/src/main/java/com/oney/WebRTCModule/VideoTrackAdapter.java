@@ -50,6 +50,10 @@ public class VideoTrackAdapter {
         }
     }
 
+    public boolean hasAdapter(String trackId) {
+        return muteImplMap.containsKey(trackId);
+    }
+
     public void removeAdapter(VideoTrack videoTrack) {
         String trackId = videoTrack.id();
         TrackMuteUnmuteImpl onMuteImpl = muteImplMap.remove(trackId);
