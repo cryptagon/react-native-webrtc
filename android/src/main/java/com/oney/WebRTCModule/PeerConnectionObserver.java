@@ -475,27 +475,6 @@ class PeerConnectionObserver implements PeerConnection.Observer {
                 remoteTracks.put(track.id(), track);
             }
         }
-
-        WritableArray streams = Arguments.createArray();
-        for(MediaStream s : mediaStreams) {
-            streams.pushMap(serializeStream(s));
-        }
-
-        WritableMap params = Arguments.createMap();
-        params.putInt("id", id);
-        params.putArray("streams", streams);
-        params.putMap("receiver", webRTCModule.serializeReceiver(receiver));
-        webRTCModule.sendEvent("peerConnectionAddedReceiver", params);
-
-    }
-
-    @Override
-    public void onTrack(RtpTransceiver transceiver) {
-        Log.d(TAG, "onTrack");
-        WritableMap params = Arguments.createMap();
-        params.putInt("id", id);
-        params.putMap("transceiver", webRTCModule.serializeTransceiver(resolveTransceiverId(transceiver), transceiver));
-        webRTCModule.sendEvent("peerConnectionStartedReceivingOnTransceiver", params);
     }
 
     private WritableMap serializeStream(MediaStream mediaStream) {
